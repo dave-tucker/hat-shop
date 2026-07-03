@@ -22,7 +22,7 @@ CREATE SCHEMA IF NOT EXISTS catalogue;
 
 CREATE TABLE IF NOT EXISTS catalogue.hats (
 	id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-	name       TEXT NOT NULL,
+	name       TEXT NOT NULL UNIQUE,
 	description TEXT NOT NULL,
 	price      NUMERIC(10,2) NOT NULL,
 	image_url  TEXT NOT NULL,
@@ -32,13 +32,13 @@ CREATE TABLE IF NOT EXISTS catalogue.hats (
 
 INSERT INTO catalogue.hats (name, description, price, image_url, stock)
 VALUES
-	('The Plexus Fedora',    'A wide-brimmed hat as distributed as your network.',  49.99, '/images/fedora.png',    100),
-	('OVN Outback',          'Rugged. Multi-cluster ready. Corks optional.',         39.99, '/images/outback.png',   50),
-	('CockroachDB Cap',      'Survives split-brain. Machine-washable.',              24.99, '/images/cap.png',       200),
-	('EVPN Beret',           'Stretches to fit any head, across any cluster.',       34.99, '/images/beret.png',     75),
-	('KRaft Kaftan Hat',     'Coordination-free. Zookeeper not included.',           29.99, '/images/kaftan.png',    120),
-	('Kubernetes Kombat Helmet', 'Battle-tested in production since 2014.',          59.99, '/images/helmet.png',   30)
-ON CONFLICT DO NOTHING;
+	('The Plexus Fedora',        'A wide-brimmed hat as distributed as your network.',  49.99, '/images/fedora.png',    100),
+	('OVN Outback',              'Rugged. Multi-cluster ready. Corks optional.',         39.99, '/images/outback.png',    50),
+	('CockroachDB Cap',          'Survives split-brain. Machine-washable.',              24.99, '/images/cap.png',       200),
+	('EVPN Beret',               'Stretches to fit any head, across any cluster.',       34.99, '/images/beret.png',      75),
+	('KRaft Kaftan Hat',         'Coordination-free. Zookeeper not included.',           29.99, '/images/kaftan.png',    120),
+	('Kubernetes Kombat Helmet', 'Battle-tested in production since 2014.',              59.99, '/images/helmet.png',     30)
+ON CONFLICT (name) DO NOTHING;
 `
 
 type Hat struct {
@@ -64,7 +64,7 @@ func main() {
 		slog.Error("tracing init", "err", err)
 		os.Exit(1)
 	}
-	defer shutdown(context.Background())
+	defer func() { if err := shutdown(context.Background()); err != nil { slog.Error("otel shutdown", "err", err) } }()
 
 	pool, err := db.Connect(ctx)
 	if err != nil {
@@ -105,7 +105,9 @@ func main() {
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	httpSrv.Shutdown(shutdownCtx)
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("http shutdown", "err", err)
+	}
 }
 
 func (s *server) listHats(w http.ResponseWriter, r *http.Request) {

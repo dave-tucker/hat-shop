@@ -1,9 +1,14 @@
+import { HatLogo } from "@/components/HatLogo";
+
 export default function Home() {
   const cluster = process.env.CLUSTER_NAME ?? "local";
 
   return (
     <div className="text-center py-16 space-y-6">
-      <h1 className="text-5xl font-bold">🎩 Welcome to Hat Shop</h1>
+      <div className="flex items-center justify-center gap-4">
+        <HatLogo className="w-16 h-16" />
+        <h1 className="text-5xl font-bold">Welcome to Hat Shop</h1>
+      </div>
       <p className="text-xl text-gray-600 max-w-2xl mx-auto">
         A multi-cluster microservices demo built on{" "}
         <strong>Plexus</strong> — OVN-Kubernetes&apos;s AdministrativeNetworkDomain

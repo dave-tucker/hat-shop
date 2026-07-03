@@ -57,7 +57,7 @@ func main() {
 		slog.Error("tracing init", "err", err)
 		os.Exit(1)
 	}
-	defer shutdown(context.Background())
+	defer func() { if err := shutdown(context.Background()); err != nil { slog.Error("otel shutdown", "err", err) } }()
 
 	pool, err := db.Connect(ctx)
 	if err != nil {
@@ -99,7 +99,9 @@ func main() {
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	httpSrv.Shutdown(shutdownCtx)
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("http shutdown", "err", err)
+	}
 }
 
 // consumeOrders reads from the orders.created Kafka topic and creates shipments.

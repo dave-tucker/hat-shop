@@ -61,7 +61,7 @@ func main() {
 		slog.Error("tracing init", "err", err)
 		os.Exit(1)
 	}
-	defer shutdown(context.Background())
+	defer func() { if err := shutdown(context.Background()); err != nil { slog.Error("otel shutdown", "err", err) } }()
 
 	pool, err := db.Connect(ctx)
 	if err != nil {
@@ -103,7 +103,9 @@ func main() {
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	httpSrv.Shutdown(shutdownCtx)
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("http shutdown", "err", err)
+	}
 }
 
 func (s *server) ensureCart(ctx context.Context, userID string) (string, error) {

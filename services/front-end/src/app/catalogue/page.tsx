@@ -1,5 +1,6 @@
 import { getCatalogue } from "@/lib/api";
 import { AddToCartButton } from "@/components/AddToCartButton";
+import { HatImage } from "@/components/HatImage";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export default async function CataloguePage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {hats.map((hat) => (
           <div key={hat.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
-            <div className="text-5xl text-center py-4">🎩</div>
+            <HatImage src={hat.image_url} alt={hat.name} />
             <div>
               <h2 className="font-semibold text-lg">{hat.name}</h2>
               <p className="text-sm text-gray-500 mt-1">{hat.description}</p>

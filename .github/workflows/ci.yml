@@ -7,7 +7,9 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/ovn-kubernetes/hat-shop
+  # Scoped to the current repo owner. Update to ghcr.io/ovn-kubernetes/hat-shop
+  # when the repo is transferred to the ovn-kubernetes org.
+  IMAGE_PREFIX: ghcr.io/dave-tucker/hat-shop
 
 jobs:
   lint-go:

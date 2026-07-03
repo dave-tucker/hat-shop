@@ -4,6 +4,7 @@ import { ClusterBadge } from "@/components/ClusterBadge";
 import { HatLogo } from "@/components/HatLogo";
 import { CartBadge } from "@/components/CartBadge";
 import { TokenBalance } from "@/components/TokenBalance";
+import { UserNav } from "@/components/UserNav";
 import { CartProvider } from "@/lib/cart-context";
 
 export const metadata: Metadata = {
@@ -29,7 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <CartBadge />
                   <a href="/orders" className="hover:underline">Orders</a>
                   <TokenBalance />
-                  <a href="/login" className="hover:underline">Login</a>
+                  <UserNav />
                 </nav>
               </div>
             </div>

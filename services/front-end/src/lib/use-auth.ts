@@ -21,7 +21,8 @@ export function useAuth(redirectTo = "/login"): Auth | null {
     const token  = localStorage.getItem("token");
     const userId = localStorage.getItem("user_id");
     if (!token || !userId) {
-      router.replace(redirectTo);
+      const from = encodeURIComponent(window.location.pathname);
+      router.replace(`${redirectTo}?from=${from}`);
     } else {
       setAuth({ token, userId });
     }

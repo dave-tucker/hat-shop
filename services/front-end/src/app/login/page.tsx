@@ -1,10 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
+
+  // Redirect away if already authenticated
+  useEffect(() => {
+    if (localStorage.getItem("token")) {
+      router.replace("/profile");
+    }
+  }, [router]);
+
   const [mode, setMode]       = useState<"login" | "register">("login");
   const [email, setEmail]     = useState("");
   const [password, setPassword] = useState("");
@@ -39,8 +47,19 @@ export default function LoginPage() {
       const { token, user_id } = await res.json();
       localStorage.setItem("token", token);
       localStorage.setItem("user_id", user_id);
+      // Fetch user profile to store name for the nav
+      try {
+        const me = await fetch(`/api/user?id=${user_id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (me.ok) {
+          const u = await me.json();
+          localStorage.setItem("user_name", u.name ?? "");
+        }
+      } catch { /* non-fatal */ }
       window.dispatchEvent(new Event("authChanged"));
-      router.push("/catalogue");
+      const from = new URLSearchParams(window.location.search).get("from");
+      router.push(from ?? "/catalogue");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {

@@ -229,10 +229,14 @@ func (s *server) createOrder(w http.ResponseWriter, r *http.Request) {
 		"total":            total,
 		"shipping_address": addr,
 	})
-	_ = s.kafka.WriteMessages(ctx, kafka.Message{
+	if err := s.kafka.WriteMessages(ctx, kafka.Message{
 		Key:   []byte(orderID),
 		Value: payload,
-	})
+	}); err != nil {
+		slog.Error("kafka publish", "err", err, "order_id", orderID)
+		// Non-fatal: order is created, shipping will miss it but status can be
+		// corrected manually. Log prominently so this is visible.
+	}
 
 	w.WriteHeader(http.StatusCreated)
 	middleware.JSON(w, map[string]string{"id": orderID})

@@ -31,9 +31,6 @@ CREATE TABLE IF NOT EXISTS shipping.shipments (
 );
 `
 
-// statusProgression defines the order of shipping states.
-var statusProgression = []string{"preparing", "shipped", "delivered"}
-
 type Shipment struct {
 	ID          string    `json:"id"`
 	OrderID     string    `json:"order_id"`

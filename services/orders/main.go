@@ -147,7 +147,7 @@ func (s *server) createOrder(w http.ResponseWriter, r *http.Request) {
 		middleware.Error(w, "tx begin", http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	cluster := os.Getenv("CLUSTER_NAME")
 	if cluster == "" {
@@ -245,7 +245,9 @@ func (s *server) getOrder(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	for rows.Next() {
 		var item OrderItem
-		rows.Scan(&item.HatID, &item.Quantity, &item.Price)
+		if err := rows.Scan(&item.HatID, &item.Quantity, &item.Price); err != nil {
+			continue
+		}
 		o.Items = append(o.Items, item)
 	}
 

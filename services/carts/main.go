@@ -139,7 +139,9 @@ func (s *server) getCart(w http.ResponseWriter, r *http.Request) {
 	cart := Cart{ID: cartID, UserID: userID, Items: []CartItem{}}
 	for rows.Next() {
 		var item CartItem
-		rows.Scan(&item.ID, &item.HatID, &item.Quantity)
+		if err := rows.Scan(&item.ID, &item.HatID, &item.Quantity); err != nil {
+			continue
+		}
 		cart.Items = append(cart.Items, item)
 	}
 

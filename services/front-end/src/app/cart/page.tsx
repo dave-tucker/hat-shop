@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { HatLogo } from "@/components/HatLogo";
 
 interface CartItem { id: string; hat_id: string; quantity: number; }
 interface Hat { id: string; name: string; price: number; }
@@ -77,7 +78,10 @@ export default function CartPage() {
           {items.map(item => (
             <div key={item.id} className="flex justify-between items-center px-5 py-4">
               <div>
-                <p className="font-medium">🎩 {hatName(item.hat_id)}</p>
+                <p className="font-medium flex items-center gap-1.5">
+                <HatLogo className="w-4 h-3 shrink-0" />
+                {hatName(item.hat_id)}
+              </p>
                 <p className="text-sm text-gray-400">qty: {item.quantity}</p>
               </div>
               <p className="font-semibold">${(hatPrice(item.hat_id) * item.quantity).toFixed(2)}</p>

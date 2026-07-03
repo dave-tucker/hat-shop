@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalogue
+  namespace: hat-shop
+  labels:
+    app: catalogue
+spec:
+  selector:
+    app: catalogue
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http

@@ -1,0 +1,151 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/ovn-kubernetes/hat-shop/pkg/db"
+	"github.com/ovn-kubernetes/hat-shop/pkg/middleware"
+	"github.com/ovn-kubernetes/hat-shop/pkg/tracing"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/trace"
+)
+
+const migration = `
+CREATE SCHEMA IF NOT EXISTS payments;
+
+CREATE TABLE IF NOT EXISTS payments.payments (
+	id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	order_id   UUID NOT NULL,
+	amount     NUMERIC(10,2) NOT NULL,
+	status     TEXT NOT NULL DEFAULT 'pending',
+	cluster    TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+`
+
+type Payment struct {
+	ID        string    `json:"id"`
+	OrderID   string    `json:"order_id"`
+	Amount    float64   `json:"amount"`
+	Status    string    `json:"status"`
+	Cluster   string    `json:"cluster"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type server struct {
+	pool   *pgxpool.Pool
+	tracer trace.Tracer
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	tracer, shutdown, err := tracing.Init(ctx, "payments")
+	if err != nil {
+		slog.Error("tracing init", "err", err)
+		os.Exit(1)
+	}
+	defer shutdown(context.Background())
+
+	pool, err := db.Connect(ctx)
+	if err != nil {
+		slog.Error("db connect", "err", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	if err := db.RunMigration(ctx, pool, migration); err != nil {
+		slog.Error("migration", "err", err)
+		os.Exit(1)
+	}
+
+	srv := &server{pool: pool, tracer: tracer}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", middleware.Health())
+	mux.Handle("POST /payments", middleware.Auth(http.HandlerFunc(srv.processPayment)))
+	mux.Handle("GET /payments/{orderId}", middleware.Auth(http.HandlerFunc(srv.getPayment)))
+
+	handler := middleware.OTELPropagation(middleware.Logging(mux))
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	httpSrv := &http.Server{Addr: ":" + port, Handler: handler}
+	go func() {
+		slog.Info("payments service listening", "port", port)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("listen", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	httpSrv.Shutdown(shutdownCtx)
+}
+
+func (s *server) processPayment(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.tracer.Start(r.Context(), "payments.processPayment")
+	defer span.End()
+
+	var req struct {
+		OrderID string  `json:"order_id"`
+		Amount  float64 `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		middleware.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	cluster := os.Getenv("CLUSTER_NAME")
+	if cluster == "" {
+		cluster = "local"
+	}
+
+	// In a real implementation this would call a payment gateway.
+	// For the demo, all payments succeed.
+	var p Payment
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO payments.payments (order_id, amount, status, cluster)
+		 VALUES ($1, $2, 'authorised', $3)
+		 RETURNING id, order_id, amount::float8, status, cluster, created_at`,
+		req.OrderID, req.Amount, cluster).
+		Scan(&p.ID, &p.OrderID, &p.Amount, &p.Status, &p.Cluster, &p.CreatedAt)
+	if err != nil {
+		middleware.Error(w, "payment failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	middleware.JSON(w, p)
+}
+
+func (s *server) getPayment(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.tracer.Start(r.Context(), "payments.getPayment")
+	defer span.End()
+
+	orderID := r.PathValue("orderId")
+	var p Payment
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, order_id, amount::float8, status, cluster, created_at
+		 FROM payments.payments WHERE order_id = $1`, orderID).
+		Scan(&p.ID, &p.OrderID, &p.Amount, &p.Status, &p.Cluster, &p.CreatedAt)
+	if err != nil {
+		middleware.Error(w, "payment not found", http.StatusNotFound)
+		return
+	}
+
+	middleware.JSON(w, p)
+}

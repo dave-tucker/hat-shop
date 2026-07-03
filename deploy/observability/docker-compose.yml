@@ -1,0 +1,30 @@
+# Observability stack for Hat Shop — runs OUTSIDE the k8s clusters.
+# Collects OTEL traces from all clusters and displays them in Jaeger.
+#
+# Usage:
+#   docker compose -f deploy/observability/docker-compose.yml up -d
+#
+# Then set OTEL_EXPORTER_OTLP_ENDPOINT in your cluster overlay to:
+#   http://<this-host-ip>:4318
+#
+# Jaeger UI: http://localhost:16686
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.103.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.58
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "14250:14250"   # gRPC for collector→Jaeger

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-config
+  namespace: hat-shop
+data:
+  CLUSTER_NAME: "local"
+  crdb_subdomain: "crdb-local"
+  kafka_subdomain: "kafka-local"
+  # podman kube play: pods are reachable by Deployment name, no .svc.cluster.local
+  DATABASE_URL: "postgresql://root@cockroachdb:26257/defaultdb?sslmode=disable"
+  KAFKA_ADDR: "kafka:9092"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.containers.internal:4318"

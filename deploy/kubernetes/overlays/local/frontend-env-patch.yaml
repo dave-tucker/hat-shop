@@ -1,0 +1,28 @@
+# podman kube play resolves pods by Deployment name — patch the frontend's
+# backend URLs away from k8s svc DNS to plain pod names.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: front-end
+  namespace: hat-shop
+spec:
+  template:
+    spec:
+      containers:
+        - name: front-end
+          env:
+            - name: CATALOGUE_URL
+              value: "http://catalogue:8080"
+            - name: ORDERS_URL
+              value: "http://orders:8080"
+            - name: CARTS_URL
+              value: "http://carts:8080"
+            - name: PAYMENTS_URL
+              value: "http://payments:8080"
+            - name: SHIPPING_URL
+              value: "http://shipping:8080"
+            - name: USER_URL
+              value: "http://user:8080"
+          ports:
+            - containerPort: 3000
+              hostPort: 3000

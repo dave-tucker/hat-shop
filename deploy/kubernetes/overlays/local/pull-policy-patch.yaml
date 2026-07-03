@@ -1,0 +1,5 @@
+# Use locally built images — don't attempt to pull from GHCR.
+# Apply to every Deployment via a wildcard target.
+- op: add
+  path: /spec/template/spec/containers/0/imagePullPolicy
+  value: Never

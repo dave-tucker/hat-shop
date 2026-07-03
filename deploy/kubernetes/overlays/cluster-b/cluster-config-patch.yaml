@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-config
+  namespace: hat-shop
+data:
+  CLUSTER_NAME: "cluster-b"
+  crdb_subdomain: "crdb-b"
+  kafka_subdomain: "kafka-b"
+  DATABASE_URL: "postgresql://root@cockroachdb-public.hat-shop.svc.cluster.local:26257/defaultdb?sslmode=disable"
+  KAFKA_ADDR: "kafka-bootstrap.hat-shop.svc.cluster.local:9092"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://OTEL_COLLECTOR_HOST:4318"

@@ -1,0 +1,35 @@
+# Go
+*.test
+*.out
+vendor/
+# Compiled service binaries
+services/catalogue/catalogue
+services/orders/orders
+services/carts/carts
+services/payments/payments
+services/shipping/shipping
+services/user/user
+
+# Node
+node_modules/
+.next/
+services/front-end/.env.local
+
+# Build artefacts
+dist/
+bin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# TS build cache
+*.tsbuildinfo
+
+# Debug/scratch scripts
+scripts/debug-*.mjs
+screenshots/debug-*.png
+
+# OS
+.DS_Store

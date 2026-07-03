@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# StatefulSets for CockroachDB and Kafka. Included by production overlays
+# (cluster-a, cluster-b) but NOT by the local overlay, which substitutes
+# single-node Deployments for podman kube play compatibility.
+resources:
+  - cockroachdb-statefulset.yaml
+  - kafka-statefulset.yaml

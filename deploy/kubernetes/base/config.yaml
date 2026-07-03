@@ -1,0 +1,25 @@
+# cluster-config is patched by each overlay to inject cluster-specific values.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-config
+  namespace: hat-shop
+data:
+  # Overridden per overlay.
+  CLUSTER_NAME: "local"
+  crdb_subdomain: "crdb-local"
+  kafka_subdomain: "kafka-local"
+  DATABASE_URL: "postgresql://root@cockroachdb-public.hat-shop.svc.cluster.local:26257/defaultdb?sslmode=disable"
+  KAFKA_ADDR: "kafka-bootstrap.hat-shop.svc.cluster.local:9092"
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+---
+# Secret values — override with a real Secret in production.
+# For local dev these defaults are acceptable; for cluster overlays,
+# use `kubectl create secret` or a secrets manager.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hat-shop-secrets
+  namespace: hat-shop
+stringData:
+  JWT_SECRET: "insecure-dev-secret-change-me"

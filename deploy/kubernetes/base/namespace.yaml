@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hat-shop
+  labels:
+    app.kubernetes.io/part-of: hat-shop
+---
+# ClusterUserDefinedNetwork — OVN-Kubernetes AND integration.
+# This gives the hat-shop namespace its own stretched L2 network segment,
+# shared across all clusters in the Plexus AdministrativeNetworkDomain.
+apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: hat-shop
+spec:
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: hat-shop
+  network:
+    topology: Layer2
+    layer2:
+      role: Primary
+      subnets:
+        - "10.200.0.0/16"

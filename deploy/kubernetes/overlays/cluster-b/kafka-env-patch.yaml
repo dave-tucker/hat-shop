@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: hat-shop
+spec:
+  template:
+    spec:
+      subdomain: kafka-b
+      containers:
+        - name: kafka
+          env:
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: >-
+                0@kafka-0.kafka-a.hat-shop.svc.clusterset.local:9093,
+                1@kafka-1.kafka-a.hat-shop.svc.clusterset.local:9093,
+                2@kafka-0.kafka-b.hat-shop.svc.cluster.local:9093,
+                3@kafka-1.kafka-b.hat-shop.svc.cluster.local:9093
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: PLAINTEXT://$(POD_NAME).kafka-b.hat-shop.svc.cluster.local:9092

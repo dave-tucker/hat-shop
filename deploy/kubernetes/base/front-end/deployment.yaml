@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: front-end
+  namespace: hat-shop
+  labels:
+    app: front-end
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: front-end
+  template:
+    metadata:
+      labels:
+        app: front-end
+    spec:
+      containers:
+        - name: front-end
+          image: ghcr.io/ovn-kubernetes/hat-shop/front-end:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: cluster-config
+          env:
+            - name: CATALOGUE_URL
+              value: "http://catalogue.hat-shop.svc.cluster.local:8080"
+            - name: ORDERS_URL
+              value: "http://orders.hat-shop.svc.cluster.local:8080"
+            - name: CARTS_URL
+              value: "http://carts.hat-shop.svc.cluster.local:8080"
+            - name: PAYMENTS_URL
+              value: "http://payments.hat-shop.svc.cluster.local:8080"
+            - name: SHIPPING_URL
+              value: "http://shipping.hat-shop.svc.cluster.local:8080"
+            - name: USER_URL
+              value: "http://user.hat-shop.svc.cluster.local:8080"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

@@ -1,0 +1,38 @@
+import type { Metadata } from "next";
+import "./globals.css";
+import { ClusterBadge } from "@/components/ClusterBadge";
+
+export const metadata: Metadata = {
+  title: "Hat Shop — Plexus Multi-Cluster Demo",
+  description: "A multi-cluster microservices demo powered by Plexus.",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body className="min-h-screen bg-gray-50 text-gray-900">
+        <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="/" className="text-xl font-bold tracking-tight">
+              🎩 Hat Shop
+            </a>
+            <div className="flex items-center gap-4">
+              <ClusterBadge />
+              <nav className="flex gap-4 text-sm">
+                <a href="/catalogue" className="hover:underline">Catalogue</a>
+                <a href="/cart" className="hover:underline">Cart</a>
+                <a href="/orders" className="hover:underline">Orders</a>
+                <a href="/login" className="hover:underline">Login</a>
+              </nav>
+            </div>
+          </div>
+        </header>
+        <main className="max-w-6xl mx-auto px-4 py-8">{children}</main>
+        <footer className="border-t border-gray-200 mt-16 py-6 text-center text-xs text-gray-400">
+          Hat Shop — Multi-cluster demo powered by{" "}
+          <a href="https://github.com/ovn-kubernetes" className="underline">Plexus / OVN-Kubernetes</a>
+        </footer>
+      </body>
+    </html>
+  );
+}

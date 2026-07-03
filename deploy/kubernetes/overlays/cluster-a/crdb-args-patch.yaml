@@ -1,0 +1,28 @@
+# Patches the CockroachDB StatefulSet --join flag to bootstrap the global
+# cluster. Local pods are reached via cluster.local; remote cluster-b pods
+# are reached via Plexus clusterset.local DNS.
+#
+# Gossip handles full membership after initial bootstrap — only 1-2 nodes
+# per cluster are needed in --join.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cockroachdb
+  namespace: hat-shop
+spec:
+  template:
+    spec:
+      subdomain: crdb-a
+      containers:
+        - name: cockroachdb
+          command:
+            - /cockroach/cockroach
+            - start
+            - --insecure
+            - --advertise-host=$(POD_NAME).crdb-a.hat-shop.svc.cluster.local
+            - --http-addr=0.0.0.0:8080
+            - --listen-addr=0.0.0.0:26257
+            - --cache=256MiB
+            - --max-sql-memory=256MiB
+            - --cluster-name=hat-shop
+            - --join=cockroachdb-0.crdb-a.hat-shop.svc.cluster.local:26257,cockroachdb-1.crdb-a.hat-shop.svc.cluster.local:26257,cockroachdb-0.crdb-b.hat-shop.svc.clusterset.local:26257,cockroachdb-1.crdb-b.hat-shop.svc.clusterset.local:26257

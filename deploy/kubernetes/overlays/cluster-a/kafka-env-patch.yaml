@@ -1,0 +1,23 @@
+# Patches the Kafka StatefulSet KRaft quorum voters to include brokers from
+# both clusters. Node IDs: cluster-a pods get 0,1; cluster-b pods get 2,3.
+# Format: <node-id>@<host>:<controller-port>
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: hat-shop
+spec:
+  template:
+    spec:
+      subdomain: kafka-a
+      containers:
+        - name: kafka
+          env:
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: >-
+                0@kafka-0.kafka-a.hat-shop.svc.cluster.local:9093,
+                1@kafka-1.kafka-a.hat-shop.svc.cluster.local:9093,
+                2@kafka-0.kafka-b.hat-shop.svc.clusterset.local:9093,
+                3@kafka-1.kafka-b.hat-shop.svc.clusterset.local:9093
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: PLAINTEXT://$(POD_NAME).kafka-a.hat-shop.svc.cluster.local:9092

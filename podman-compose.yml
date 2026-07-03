@@ -1,0 +1,168 @@
+name: hat-shop
+
+# Local development stack for Hat Shop.
+# Usage: podman compose up --build
+#
+# Services reach each other by name (e.g. cockroachdb:26257, kafka:9092).
+# The front-end is exposed on http://localhost:3000
+
+x-common-env: &common-env
+  DATABASE_URL: postgresql://root@cockroachdb:26257/defaultdb?sslmode=disable
+  KAFKA_ADDR: kafka:9092
+  JWT_SECRET: dev-secret-hat-shop
+  CLUSTER_NAME: local
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+
+x-service-defaults: &service-defaults
+  build:
+    context: .
+  restart: on-failure
+  depends_on:
+    cockroachdb:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+
+services:
+
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+
+  cockroachdb:
+    image: docker.io/cockroachdb/cockroach:v24.1.3
+    command: start-single-node --insecure
+    ports:
+      - "26257:26257"
+      - "8090:8080"   # CockroachDB admin UI
+    volumes:
+      - crdb-data:/cockroach/cockroach-data
+    healthcheck:
+      test: ["CMD", "/cockroach/cockroach", "sql", "--insecure", "-e", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    image: docker.io/apache/kafka:3.7.0
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  # ── Application services ────────────────────────────────────────────────────
+
+  catalogue:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/catalogue/Dockerfile
+    image: ghcr.io/ovn-kubernetes/hat-shop/catalogue:latest
+    environment:
+      <<: *common-env
+      PORT: "8080"
+    ports:
+      - "8081:8080"
+
+  orders:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/orders/Dockerfile
+    image: ghcr.io/ovn-kubernetes/hat-shop/orders:latest
+    environment:
+      <<: *common-env
+      PORT: "8080"
+    ports:
+      - "8082:8080"
+
+  carts:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/carts/Dockerfile
+    image: ghcr.io/ovn-kubernetes/hat-shop/carts:latest
+    environment:
+      <<: *common-env
+      PORT: "8080"
+    ports:
+      - "8083:8080"
+
+  payments:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/payments/Dockerfile
+    image: ghcr.io/ovn-kubernetes/hat-shop/payments:latest
+    environment:
+      <<: *common-env
+      PORT: "8080"
+    ports:
+      - "8084:8080"
+
+  shipping:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/shipping/Dockerfile
+    image: ghcr.io/ovn-kubernetes/hat-shop/shipping:latest
+    environment:
+      <<: *common-env
+      PORT: "8080"
+    ports:
+      - "8086:8080"
+
+  user:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/user/Dockerfile
+    image: ghcr.io/ovn-kubernetes/hat-shop/user:latest
+    environment:
+      <<: *common-env
+      PORT: "8080"
+    ports:
+      - "8087:8080"
+
+  front-end:
+    build:
+      context: .
+      dockerfile: services/front-end/Dockerfile
+      args:
+        CLUSTER_NAME: local
+    image: ghcr.io/ovn-kubernetes/hat-shop/front-end:latest
+    environment:
+      CLUSTER_NAME: local
+      CATALOGUE_URL: http://catalogue:8080
+      ORDERS_URL: http://orders:8080
+      CARTS_URL: http://carts:8080
+      PAYMENTS_URL: http://payments:8080
+      SHIPPING_URL: http://shipping:8080
+      USER_URL: http://user:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - catalogue
+      - orders
+      - carts
+      - payments
+      - shipping
+      - user
+
+volumes:
+  crdb-data:
+  kafka-data:

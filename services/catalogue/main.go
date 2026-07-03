@@ -32,13 +32,25 @@ CREATE TABLE IF NOT EXISTS catalogue.hats (
 
 INSERT INTO catalogue.hats (name, description, price, image_url, stock)
 VALUES
-	('The Plexus Fedora',        'A wide-brimmed hat as distributed as your network.',  49.99, '/images/fedora.png',    100),
-	('OVN Outback',              'Rugged. Multi-cluster ready. Corks optional.',         39.99, '/images/outback.png',    50),
-	('CockroachDB Cap',          'Survives split-brain. Machine-washable.',              24.99, '/images/cap.png',       200),
-	('EVPN Beret',               'Stretches to fit any head, across any cluster.',       34.99, '/images/beret.png',      75),
-	('KRaft Kaftan Hat',         'Coordination-free. Zookeeper not included.',           29.99, '/images/kaftan.png',    120),
-	('Kubernetes Kombat Helmet', 'Battle-tested in production since 2014.',              59.99, '/images/helmet.png',     30)
-ON CONFLICT (name) DO NOTHING;
+	('The Plexus Fedora',
+	 'A wide-brimmed fedora in deep navy wool felt, hand-blocked into a classic teardrop crown. The hatband is woven from a custom jacquard ribbon printed with a repeating network-topology graph in silver thread — nodes and edges that wrap all the way around. The brim edge is bound in the same silver grosgrain. Inspired by Plexus''s AdministrativeNetworkDomain: every node in the pattern connects to every other, across any distance.',
+	 49.99, '/images/fedora.png', 100),
+	('OVN Outback',
+	 'A wide-brimmed bush hat in weathered khaki cotton canvas, inspired by the Australian outback. The leather chinstrap and sweatband are hand-stitched. A cluster of five small metallic cork charms hang from the left brim — one for each Kubernetes node in a typical HA control plane. The crown is ventilated with six brass eyelets. Built for multi-region deployments and actual deserts.',
+	 39.99, '/images/outback.png', 50),
+	('CockroachDB Cap',
+	 'A six-panel structured baseball cap in deep espresso brown with a low-profile crown. The front panel carries a subtle embroidered cockroach silhouette in tonal stitching — visible only in raking light, like a hidden easter egg. The underbrim is iridescent amber. Snapback closure with a custom metal buckle stamped with the words SURVIVES EVERYTHING. Inspired by CockroachDB''s legendary tolerance for failure.',
+	 24.99, '/images/cap.png', 200),
+	('EVPN Beret',
+	 'A generously oversized French beret in midnight black boiled wool — the kind that flops dramatically to one side, as if already stretched across a second cluster. The leather sweatband is stamped with the MAC address DE:AD:BE:EF:00:01 in gold foil. A single flat grosgrain ribbon is woven in a figure-eight around the crown, suggesting an EVPN Type-2 route advertisement. Sized to fit any head, across any failure domain.',
+	 34.99, '/images/beret.png', 75),
+	('KRaft Kaftan Hat',
+	 'A wide-brimmed sun hat constructed from undyed raw linen. The brim is wide enough to provide genuine consensus coverage. The crown is tall and cylindrical, wrapped in a thin cord in a geometric pattern that traces a Raft state machine — leader, follower, candidate — in terracotta and ochre thread. No ZooKeeper required. No coordination overhead. Just the hat and the sun.',
+	 29.99, '/images/kaftan.png', 120),
+	('Kubernetes Kombat Helmet',
+	 'A matte midnight-blue tactical combat helmet with a modern ballistic shell profile. The exterior carries a subtle embossed Kubernetes helm-wheel motif across the crown — the same eight-spoke design as the project logo, rendered in Kubernetes blue as a raised lacquered inlay. A cloth patch on the left side reads PROD SINCE 2014 in military stencil font. Battle-tested. Production-hardened. Never goes down without a fight.',
+	 59.99, '/images/helmet.png', 30)
+ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description;
 `
 
 type Hat struct {

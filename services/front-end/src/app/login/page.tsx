@@ -39,6 +39,7 @@ export default function LoginPage() {
       const { token, user_id } = await res.json();
       localStorage.setItem("token", token);
       localStorage.setItem("user_id", user_id);
+      window.dispatchEvent(new Event("authChanged"));
       router.push("/catalogue");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");

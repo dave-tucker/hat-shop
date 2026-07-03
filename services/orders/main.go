@@ -222,6 +222,8 @@ func (s *server) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Publish event so shipping can pick it up.
+	// Use a goroutine with context.Background() so the publish is not cancelled
+	// when the HTTP request context ends after the response is sent.
 	payload, _ := json.Marshal(map[string]any{
 		"order_id":         orderID,
 		"user_id":          claims.UserID,
@@ -229,14 +231,17 @@ func (s *server) createOrder(w http.ResponseWriter, r *http.Request) {
 		"total":            total,
 		"shipping_address": addr,
 	})
-	if err := s.kafka.WriteMessages(ctx, kafka.Message{
-		Key:   []byte(orderID),
-		Value: payload,
-	}); err != nil {
-		slog.Error("kafka publish", "err", err, "order_id", orderID)
-		// Non-fatal: order is created, shipping will miss it but status can be
-		// corrected manually. Log prominently so this is visible.
-	}
+	msg := kafka.Message{Key: []byte(orderID), Value: payload}
+	go func() {
+		pubCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := s.kafka.WriteMessages(pubCtx, msg); err != nil {
+			slog.Error("kafka publish FAILED — order will stay paid until manually fixed",
+				"err", err, "order_id", orderID)
+		} else {
+			slog.Info("kafka publish ok", "order_id", orderID)
+		}
+	}()
 
 	w.WriteHeader(http.StatusCreated)
 	middleware.JSON(w, map[string]string{"id": orderID})
@@ -296,6 +301,25 @@ func (s *server) listOrders(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		orders = append(orders, o)
+	}
+	rows.Close()
+
+	// Fetch items for each order so the frontend can show product previews.
+	for i := range orders {
+		itemRows, err := s.pool.Query(ctx,
+			`SELECT hat_id, quantity, price::float8 FROM orders.items WHERE order_id = $1`,
+			orders[i].ID)
+		if err != nil {
+			continue
+		}
+		for itemRows.Next() {
+			var item OrderItem
+			if err := itemRows.Scan(&item.HatID, &item.Quantity, &item.Price); err != nil {
+				continue
+			}
+			orders[i].Items = append(orders[i].Items, item)
+		}
+		itemRows.Close()
 	}
 
 	middleware.JSON(w, orders)

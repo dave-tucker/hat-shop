@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,13 +23,17 @@ const migration = `
 CREATE SCHEMA IF NOT EXISTS orders;
 
 CREATE TABLE IF NOT EXISTS orders.orders (
-	id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-	user_id    UUID NOT NULL,
-	status     TEXT NOT NULL DEFAULT 'pending',
-	total      NUMERIC(10,2) NOT NULL,
-	cluster    TEXT NOT NULL,
-	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	user_id          UUID NOT NULL,
+	status           TEXT NOT NULL DEFAULT 'pending',
+	total            NUMERIC(10,2) NOT NULL,
+	cluster          TEXT NOT NULL,
+	shipping_address TEXT NOT NULL DEFAULT 'Default Gateway — 0.0.0.0, The Internet',
+	created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE orders.orders ADD COLUMN IF NOT EXISTS
+	shipping_address TEXT NOT NULL DEFAULT 'Default Gateway — 0.0.0.0, The Internet';
 
 CREATE TABLE IF NOT EXISTS orders.items (
 	id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -39,6 +44,12 @@ CREATE TABLE IF NOT EXISTS orders.items (
 );
 `
 
+// Status values for the orders lifecycle:
+//   pending  → order created, awaiting payment
+//   paid     → payment authorised by payments service
+//   shipped  → shipment created by shipping service (Kafka consumer)
+//   delivered → future use
+
 type OrderItem struct {
 	HatID    string  `json:"hat_id"`
 	Quantity int     `json:"quantity"`
@@ -46,13 +57,14 @@ type OrderItem struct {
 }
 
 type Order struct {
-	ID        string      `json:"id"`
-	UserID    string      `json:"user_id"`
-	Status    string      `json:"status"`
-	Total     float64     `json:"total"`
-	Cluster   string      `json:"cluster"`
-	Items     []OrderItem `json:"items,omitempty"`
-	CreatedAt time.Time   `json:"created_at"`
+	ID              string      `json:"id"`
+	UserID          string      `json:"user_id"`
+	Status          string      `json:"status"`
+	Total           float64     `json:"total"`
+	Cluster         string      `json:"cluster"`
+	ShippingAddress string      `json:"shipping_address"`
+	Items           []OrderItem `json:"items,omitempty"`
+	CreatedAt       time.Time   `json:"created_at"`
 }
 
 type server struct {
@@ -70,7 +82,11 @@ func main() {
 		slog.Error("tracing init", "err", err)
 		os.Exit(1)
 	}
-	defer func() { if err := shutdown(context.Background()); err != nil { slog.Error("otel shutdown", "err", err) } }()
+	defer func() {
+		if err := shutdown(context.Background()); err != nil {
+			slog.Error("otel shutdown", "err", err)
+		}
+	}()
 
 	pool, err := db.Connect(ctx)
 	if err != nil {
@@ -98,6 +114,8 @@ func main() {
 	mux.Handle("POST /orders", middleware.Auth(http.HandlerFunc(srv.createOrder)))
 	mux.Handle("GET /orders", middleware.Auth(http.HandlerFunc(srv.listOrders)))
 	mux.Handle("GET /orders/{id}", middleware.Auth(http.HandlerFunc(srv.getOrder)))
+	// Internal status transition endpoint — called by payments and shipping services.
+	mux.HandleFunc("PATCH /orders/{id}/status", srv.updateStatus)
 
 	handler := middleware.OTELPropagation(middleware.Logging(mux))
 
@@ -130,7 +148,8 @@ func (s *server) createOrder(w http.ResponseWriter, r *http.Request) {
 	claims, _ := middleware.ClaimsFrom(ctx)
 
 	var req struct {
-		Items []OrderItem `json:"items"`
+		Items           []OrderItem `json:"items"`
+		ShippingAddress string      `json:"shipping_address"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		middleware.Error(w, "invalid body", http.StatusBadRequest)
@@ -149,15 +168,39 @@ func (s *server) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Check and decrement stock for each item atomically within the transaction.
+	// The UPDATE only succeeds if stock >= requested quantity.
+	for _, item := range req.Items {
+		tag, err := tx.Exec(ctx,
+			`UPDATE catalogue.hats SET stock = stock - $1 WHERE id = $2 AND stock >= $1`,
+			item.Quantity, item.HatID)
+		if err != nil {
+			middleware.Error(w, "stock check failed", http.StatusInternalServerError)
+			return
+		}
+		if tag.RowsAffected() == 0 {
+			middleware.Error(w,
+				fmt.Sprintf("insufficient stock for hat %s", item.HatID),
+				http.StatusConflict)
+			return
+		}
+	}
+
 	cluster := os.Getenv("CLUSTER_NAME")
 	if cluster == "" {
 		cluster = "local"
 	}
 
+	addr := req.ShippingAddress
+	if addr == "" {
+		addr = "Default Gateway — 0.0.0.0, The Internet"
+	}
+
 	var orderID string
 	err = tx.QueryRow(ctx,
-		`INSERT INTO orders.orders (user_id, total, cluster) VALUES ($1, $2, $3) RETURNING id`,
-		claims.UserID, total, cluster).Scan(&orderID)
+		`INSERT INTO orders.orders (user_id, total, cluster, shipping_address)
+		 VALUES ($1, $2, $3, $4) RETURNING id`,
+		claims.UserID, total, cluster, addr).Scan(&orderID)
 	if err != nil {
 		middleware.Error(w, "insert order", http.StatusInternalServerError)
 		return
@@ -180,10 +223,11 @@ func (s *server) createOrder(w http.ResponseWriter, r *http.Request) {
 
 	// Publish event so shipping can pick it up.
 	payload, _ := json.Marshal(map[string]any{
-		"order_id": orderID,
-		"user_id":  claims.UserID,
-		"cluster":  cluster,
-		"total":    total,
+		"order_id":         orderID,
+		"user_id":          claims.UserID,
+		"cluster":          cluster,
+		"total":            total,
+		"shipping_address": addr,
 	})
 	_ = s.kafka.WriteMessages(ctx, kafka.Message{
 		Key:   []byte(orderID),
@@ -194,6 +238,36 @@ func (s *server) createOrder(w http.ResponseWriter, r *http.Request) {
 	middleware.JSON(w, map[string]string{"id": orderID})
 }
 
+func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.tracer.Start(r.Context(), "orders.updateStatus")
+	defer span.End()
+
+	id := r.PathValue("id")
+
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		middleware.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	allowed := map[string]bool{"paid": true, "shipped": true, "delivered": true, "cancelled": true}
+	if !allowed[req.Status] {
+		middleware.Error(w, "invalid status", http.StatusBadRequest)
+		return
+	}
+
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE orders.orders SET status = $1 WHERE id = $2`, req.Status, id)
+	if err != nil || tag.RowsAffected() == 0 {
+		middleware.Error(w, "order not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *server) listOrders(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.tracer.Start(r.Context(), "orders.listOrders")
 	defer span.End()
@@ -201,7 +275,7 @@ func (s *server) listOrders(w http.ResponseWriter, r *http.Request) {
 	claims, _ := middleware.ClaimsFrom(ctx)
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, user_id, status, total::float8, cluster, created_at
+		`SELECT id, user_id, status, total::float8, cluster, shipping_address, created_at
 		 FROM orders.orders WHERE user_id = $1 ORDER BY created_at DESC`,
 		claims.UserID)
 	if err != nil {
@@ -213,7 +287,7 @@ func (s *server) listOrders(w http.ResponseWriter, r *http.Request) {
 	orders := []Order{}
 	for rows.Next() {
 		var o Order
-		if err := rows.Scan(&o.ID, &o.UserID, &o.Status, &o.Total, &o.Cluster, &o.CreatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.UserID, &o.Status, &o.Total, &o.Cluster, &o.ShippingAddress, &o.CreatedAt); err != nil {
 			middleware.Error(w, "scan", http.StatusInternalServerError)
 			return
 		}
@@ -232,9 +306,9 @@ func (s *server) getOrder(w http.ResponseWriter, r *http.Request) {
 
 	var o Order
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, user_id, status, total::float8, cluster, created_at
+		`SELECT id, user_id, status, total::float8, cluster, shipping_address, created_at
 		 FROM orders.orders WHERE id = $1 AND user_id = $2`, id, claims.UserID).
-		Scan(&o.ID, &o.UserID, &o.Status, &o.Total, &o.Cluster, &o.CreatedAt)
+		Scan(&o.ID, &o.UserID, &o.Status, &o.Total, &o.Cluster, &o.ShippingAddress, &o.CreatedAt)
 	if err != nil {
 		middleware.Error(w, "order not found", http.StatusNotFound)
 		return

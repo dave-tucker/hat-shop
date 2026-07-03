@@ -8,6 +8,7 @@ interface Order {
   status: string;
   total: number;
   cluster: string;
+  shipping_address: string;
   created_at: string;
 }
 
@@ -63,7 +64,12 @@ export default function OrdersPage() {
                 </p>
               </div>
             </div>
-            <p className="text-xs text-gray-400 mt-3">
+                {order.shipping_address && (
+                  <p className="text-xs font-mono text-gray-400 mt-2">
+                    📦 {order.shipping_address}
+                  </p>
+                )}
+            <p className="text-xs text-gray-400 mt-2">
               {new Date(order.created_at).toLocaleString()}
             </p>
           </div>

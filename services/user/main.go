@@ -29,12 +29,16 @@ CREATE TABLE IF NOT EXISTS users.users (
 	name          TEXT NOT NULL,
 	created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Token balance: each user starts with 500 tokens, used as currency.
+ALTER TABLE users.users ADD COLUMN IF NOT EXISTS tokens BIGINT NOT NULL DEFAULT 500;
 `
 
 type User struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	ID     string `json:"id"`
+	Email  string `json:"email"`
+	Name   string `json:"name"`
+	Tokens int64  `json:"tokens"`
 }
 
 type server struct {
@@ -72,6 +76,7 @@ func main() {
 	mux.HandleFunc("POST /register", srv.register)
 	mux.HandleFunc("POST /login", srv.login)
 	mux.Handle("GET /users/{id}", middleware.Auth(http.HandlerFunc(srv.getUser)))
+	mux.Handle("GET /users/{id}/tokens", middleware.Auth(http.HandlerFunc(srv.getTokens)))
 
 	handler := middleware.OTELPropagation(middleware.Logging(mux))
 
@@ -97,6 +102,20 @@ func main() {
 	}
 }
 
+func (s *server) getTokens(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.tracer.Start(r.Context(), "user.getTokens")
+	defer span.End()
+
+	id := r.PathValue("id")
+	var tokens int64
+	err := s.pool.QueryRow(ctx, `SELECT tokens FROM users.users WHERE id = $1`, id).Scan(&tokens)
+	if err != nil {
+		middleware.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	middleware.JSON(w, map[string]int64{"tokens": tokens})
+}
+
 func (s *server) register(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.tracer.Start(r.Context(), "user.register")
 	defer span.End()
@@ -119,8 +138,8 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 
 	var u User
 	err = s.pool.QueryRow(ctx,
-		`INSERT INTO users.users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id, email, name`,
-		req.Email, string(hash), req.Name).Scan(&u.ID, &u.Email, &u.Name)
+		`INSERT INTO users.users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id, email, name, tokens`,
+		req.Email, string(hash), req.Name).Scan(&u.ID, &u.Email, &u.Name, &u.Tokens)
 	if err != nil {
 		middleware.Error(w, "email already registered", http.StatusConflict)
 		return
@@ -146,8 +165,8 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	var u User
 	var hash string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, name, password_hash FROM users.users WHERE email = $1`, req.Email).
-		Scan(&u.ID, &u.Email, &u.Name, &hash)
+		`SELECT id, email, name, tokens, password_hash FROM users.users WHERE email = $1`, req.Email).
+		Scan(&u.ID, &u.Email, &u.Name, &u.Tokens, &hash)
 	if err != nil {
 		middleware.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
@@ -188,8 +207,8 @@ func (s *server) getUser(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, name FROM users.users WHERE id = $1`, id).
-		Scan(&u.ID, &u.Email, &u.Name)
+		`SELECT id, email, name, tokens FROM users.users WHERE id = $1`, id).
+		Scan(&u.ID, &u.Email, &u.Name, &u.Tokens)
 	if err != nil {
 		middleware.Error(w, "user not found", http.StatusNotFound)
 		return

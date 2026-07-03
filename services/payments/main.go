@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,7 +25,8 @@ CREATE TABLE IF NOT EXISTS payments.payments (
 	id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	order_id   UUID NOT NULL,
 	amount     NUMERIC(10,2) NOT NULL,
-	status     TEXT NOT NULL DEFAULT 'pending',
+	tokens     BIGINT NOT NULL,
+	status     TEXT NOT NULL DEFAULT 'authorised',
 	cluster    TEXT NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -34,6 +36,7 @@ type Payment struct {
 	ID        string    `json:"id"`
 	OrderID   string    `json:"order_id"`
 	Amount    float64   `json:"amount"`
+	Tokens    int64     `json:"tokens"`
 	Status    string    `json:"status"`
 	Cluster   string    `json:"cluster"`
 	CreatedAt time.Time `json:"created_at"`
@@ -53,7 +56,11 @@ func main() {
 		slog.Error("tracing init", "err", err)
 		os.Exit(1)
 	}
-	defer func() { if err := shutdown(context.Background()); err != nil { slog.Error("otel shutdown", "err", err) } }()
+	defer func() {
+		if err := shutdown(context.Background()); err != nil {
+			slog.Error("otel shutdown", "err", err)
+		}
+	}()
 
 	pool, err := db.Connect(ctx)
 	if err != nil {
@@ -104,6 +111,7 @@ func (s *server) processPayment(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		OrderID string  `json:"order_id"`
+		UserID  string  `json:"user_id"`
 		Amount  float64 `json:"amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -111,23 +119,47 @@ func (s *server) processPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Token cost = ceil(dollar amount). 1 token ≈ $1.
+	tokenCost := int64(math.Ceil(req.Amount))
+
 	cluster := os.Getenv("CLUSTER_NAME")
 	if cluster == "" {
 		cluster = "local"
 	}
 
-	// In a real implementation this would call a payment gateway.
-	// For the demo, all payments succeed.
-	var p Payment
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO payments.payments (order_id, amount, status, cluster)
-		 VALUES ($1, $2, 'authorised', $3)
-		 RETURNING id, order_id, amount::float8, status, cluster, created_at`,
-		req.OrderID, req.Amount, cluster).
-		Scan(&p.ID, &p.OrderID, &p.Amount, &p.Status, &p.Cluster, &p.CreatedAt)
+	// Atomically deduct tokens from the user's balance.
+	// If the user doesn't have enough tokens the UPDATE matches 0 rows → 402.
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users.users SET tokens = tokens - $1 WHERE id = $2 AND tokens >= $1`,
+		tokenCost, req.UserID)
 	if err != nil {
-		middleware.Error(w, "payment failed", http.StatusInternalServerError)
+		middleware.Error(w, "token deduction failed", http.StatusInternalServerError)
 		return
+	}
+	if tag.RowsAffected() == 0 {
+		middleware.Error(w, "insufficient tokens", http.StatusPaymentRequired)
+		return
+	}
+
+	// Record the payment.
+	var p Payment
+	err = s.pool.QueryRow(ctx,
+		`INSERT INTO payments.payments (order_id, amount, tokens, cluster)
+		 VALUES ($1, $2, $3, $4)
+		 RETURNING id, order_id, amount::float8, tokens, status, cluster, created_at`,
+		req.OrderID, req.Amount, tokenCost, cluster).
+		Scan(&p.ID, &p.OrderID, &p.Amount, &p.Tokens, &p.Status, &p.Cluster, &p.CreatedAt)
+	if err != nil {
+		middleware.Error(w, "payment record failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Transition order: pending → paid (cross-schema, same CockroachDB cluster).
+	_, err = s.pool.Exec(ctx,
+		`UPDATE orders.orders SET status = 'paid' WHERE id = $1`, req.OrderID)
+	if err != nil {
+		slog.Error("order status update", "err", err, "order_id", req.OrderID)
+		// Non-fatal — tokens deducted, payment recorded.
 	}
 
 	w.WriteHeader(http.StatusCreated)
@@ -141,13 +173,12 @@ func (s *server) getPayment(w http.ResponseWriter, r *http.Request) {
 	orderID := r.PathValue("orderId")
 	var p Payment
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, order_id, amount::float8, status, cluster, created_at
+		`SELECT id, order_id, amount::float8, tokens, status, cluster, created_at
 		 FROM payments.payments WHERE order_id = $1`, orderID).
-		Scan(&p.ID, &p.OrderID, &p.Amount, &p.Status, &p.Cluster, &p.CreatedAt)
+		Scan(&p.ID, &p.OrderID, &p.Amount, &p.Tokens, &p.Status, &p.Cluster, &p.CreatedAt)
 	if err != nil {
 		middleware.Error(w, "payment not found", http.StatusNotFound)
 		return
 	}
-
 	middleware.JSON(w, p)
 }

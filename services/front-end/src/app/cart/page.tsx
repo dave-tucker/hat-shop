@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { HatLogo } from "@/components/HatLogo";
 import { useAuth } from "@/lib/use-auth";
-import { useCart } from "@/lib/cart-context";
 
 interface CartItem { id: string; hat_id: string; quantity: number; }
 interface Hat { id: string; name: string; price: number; }
@@ -12,13 +11,10 @@ interface Hat { id: string; name: string; price: number; }
 export default function CartPage() {
   const router  = useRouter();
   const auth    = useAuth();          // redirects to /login if not authenticated
-  const { refresh } = useCart();
-
   const [items, setItems]     = useState<CartItem[]>([]);
   const [hats, setHats]       = useState<Hat[]>([]);
   const [loading, setLoading] = useState(true);
-  const [placing, setPlacing] = useState(false);
-  const [error, setError]     = useState("");
+  // Cart page just shows the summary — actual checkout is on /checkout
 
   useEffect(() => {
     if (!auth) return; // wait for auth confirmation
@@ -38,38 +34,9 @@ export default function CartPage() {
   const hatName  = (id: string) => hats.find(h => h.id === id)?.name ?? id.slice(0, 8);
   const hatPrice = (id: string) => hats.find(h => h.id === id)?.price ?? 0;
   const total    = items.reduce((s, i) => s + hatPrice(i.hat_id) * i.quantity, 0);
+  const tokenCost = Math.ceil(total);
 
-  async function placeOrder() {
-    if (!auth) return;
-    setPlacing(true);
-    setError("");
-    try {
-      const orderItems = items.map(i => ({
-        hat_id: i.hat_id,
-        quantity: i.quantity,
-        price: hatPrice(i.hat_id),
-      }));
-      const res = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
-        body: JSON.stringify({ items: orderItems, total, user_id: auth.userId }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "Order failed");
-      }
-      refresh(); // clear cart badge
-      router.push("/orders");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Order failed");
-      setPlacing(false);
-    }
-  }
-
-  // auth === null means we're still waiting for the redirect — show nothing
-  if (!auth || loading) {
-    return <p className="text-gray-400 text-sm">Loading…</p>;
-  }
+  if (!auth || loading) return <p className="text-gray-400 text-sm">Loading…</p>;
 
   return (
     <div className="max-w-lg mx-auto">
@@ -98,14 +65,15 @@ export default function CartPage() {
             <span>Total</span>
             <span>${total.toFixed(2)}</span>
           </div>
-          {error && <p className="px-5 py-3 text-red-600 text-sm bg-red-50">{error}</p>}
-          <div className="px-5 py-4">
+          <div className="px-5 py-4 space-y-2">
+            <p className="text-center text-sm text-gray-400">
+              Cost: <span className="font-semibold text-gray-700">{tokenCost} tokens</span>
+            </p>
             <button
-              onClick={placeOrder}
-              disabled={placing}
-              className="w-full bg-gray-900 text-white py-3 rounded-lg font-medium hover:bg-gray-700 disabled:opacity-50"
+              onClick={() => router.push("/checkout")}
+              className="w-full bg-gray-900 text-white py-3 rounded-lg font-medium hover:bg-gray-700"
             >
-              {placing ? "Placing order…" : "Place Order"}
+              Checkout →
             </button>
           </div>
         </div>

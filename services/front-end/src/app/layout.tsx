@@ -3,6 +3,7 @@ import "./globals.css";
 import { ClusterBadge } from "@/components/ClusterBadge";
 import { HatLogo } from "@/components/HatLogo";
 import { CartBadge } from "@/components/CartBadge";
+import { TokenBalance } from "@/components/TokenBalance";
 import { CartProvider } from "@/lib/cart-context";
 
 export const metadata: Metadata = {
@@ -27,6 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <a href="/catalogue" className="hover:underline">Catalogue</a>
                   <CartBadge />
                   <a href="/orders" className="hover:underline">Orders</a>
+                  <TokenBalance />
                   <a href="/login" className="hover:underline">Login</a>
                 </nav>
               </div>

@@ -10,22 +10,54 @@ Place an order on **Cluster A**. Switch to **Cluster B**. Your order is already 
 
 ## Architecture
 
-```
-                        ┌─────────────────────────────────────────┐
-                        │           hat-shop namespace             │
-                        │   (ClusterUserDefinedNetwork, Layer2)    │
-   cluster-a            │                               cluster-b  │
-  ┌──────────┐          │                              ┌──────────┐│
-  │ front-end│          │                              │ front-end││
-  │ catalogue│          │                              │ catalogue││
-  │ orders   │──────────┼──── CockroachDB (global) ───│ orders   ││
-  │ carts    │          │                              │ carts    ││
-  │ payments │          │                              │ payments ││
-  │ shipping │──────────┼──── Kafka KRaft (global) ───│ shipping ││
-  │ user     │          │                              │ user     ││
-  └──────────┘          │                              └──────────┘│
-                        │   EVPN-stretched L2 via Plexus           │
-                        └─────────────────────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph plexus["hat-shop namespace · ClusterUserDefinedNetwork · EVPN-stretched L2 via Plexus"]
+    subgraph ca["Cluster A"]
+      direction TB
+      fe_a[front-end]
+      cat_a[catalogue]
+      ord_a[orders]
+      cart_a[carts]
+      pay_a[payments]
+      ship_a[shipping]
+      user_a[user]
+    end
+
+    subgraph infra["Plexus-stretched infrastructure"]
+      direction TB
+      crdb[(CockroachDB\nglobal cluster)]
+      kafka{{Kafka KRaft\nglobal cluster}}
+    end
+
+    subgraph cb["Cluster B"]
+      direction TB
+      fe_b[front-end]
+      cat_b[catalogue]
+      ord_b[orders]
+      cart_b[carts]
+      pay_b[payments]
+      ship_b[shipping]
+      user_b[user]
+    end
+
+    ca -->|SQL| crdb
+    cb -->|SQL| crdb
+    ord_a -->|produce| kafka
+    ship_a -->|consume| kafka
+    ord_b -->|produce| kafka
+    ship_b -->|consume| kafka
+  end
+
+  otel(["OTEL Collector\n+ Jaeger"])
+  ca -.->|traces| otel
+  cb -.->|traces| otel
+
+  style plexus fill:#f0f4ff,stroke:#6366f1,stroke-width:2px
+  style infra fill:#fafafa,stroke:#9ca3af,stroke-dasharray:5
+  style crdb fill:#0f4c3a,color:#fff,stroke:none
+  style kafka fill:#231f20,color:#fff,stroke:none
+  style otel fill:#f97316,color:#fff,stroke:none
 ```
 
 ### Services

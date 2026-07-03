@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAuth } from "@/lib/use-auth";
 
 interface Order {
   id: string;
@@ -11,22 +12,21 @@ interface Order {
 }
 
 export default function OrdersPage() {
+  const auth    = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) { setError("Please log in first"); setLoading(false); return; }
-
-    fetch("/api/orders", { headers: { Authorization: `Bearer ${token}` } })
+    if (!auth) return;
+    fetch("/api/orders", { headers: { Authorization: `Bearer ${auth.token}` } })
       .then(r => r.ok ? r.json() : Promise.reject("Failed to load orders"))
       .then(data => { setOrders(data ?? []); setLoading(false); })
       .catch(e => { setError(String(e)); setLoading(false); });
-  }, []);
+  }, [auth]);
 
-  if (loading) return <p className="text-gray-500">Loading orders…</p>;
-  if (error)   return <p className="text-red-600">{error}</p>;
+  if (!auth || loading) return <p className="text-gray-400 text-sm">Loading…</p>;
+  if (error)            return <p className="text-red-600">{error}</p>;
 
   return (
     <div>
@@ -48,7 +48,8 @@ export default function OrdersPage() {
               <div className="text-right space-y-1">
                 <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
                   order.status === "pending"   ? "bg-yellow-100 text-yellow-800" :
-                  order.status === "shipped"   ? "bg-blue-100 text-blue-800" :
+                  order.status === "paid"      ? "bg-blue-100 text-blue-800" :
+                  order.status === "shipped"   ? "bg-purple-100 text-purple-800" :
                   order.status === "delivered" ? "bg-green-100 text-green-800" :
                                                  "bg-gray-100 text-gray-800"
                 }`}>

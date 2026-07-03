@@ -27,7 +27,7 @@ export default function LoginPage() {
         setMode("login");
         setError("Registered! Please log in.");
         setLoading(false);
-        return;
+        return; // user still needs to log in to get a token
       }
 
       const res = await fetch("/api/login", {

@@ -98,14 +98,18 @@ func Health() http.HandlerFunc {
 // JSON writes v as a JSON response with status 200.
 func JSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("json encode", "err", err)
+	}
 }
 
 // Error writes a JSON error response.
 func Error(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": msg}); err != nil {
+		slog.Error("json encode error", "err", err)
+	}
 }
 
 func jwtSecret() []byte {

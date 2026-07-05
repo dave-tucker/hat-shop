@@ -95,7 +95,8 @@ func main() {
 	}
 
 	srv := &server{pool: pool, tracer: tracer}
-	go srv.consumeOrders(ctx)
+	go srv.consumeOrders(ctx)  // Kafka real-time path
+	go srv.pollPaidOrders(ctx) // DB polling backstop — catches anything Kafka misses
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", middleware.Health())
@@ -123,6 +124,90 @@ func main() {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("http shutdown", "err", err)
 	}
+}
+
+// pollPaidOrders queries the DB every SHIPPING_DELAY/2 for orders that are paid
+// but have no shipment yet, and creates shipments for them. This is a reliable
+// backstop for cases where Kafka delivery is missed (e.g. consumer-group offset
+// edge cases with an empty topic, broker restarts, etc.).
+func (s *server) pollPaidOrders(ctx context.Context) {
+	interval := shippingDelay() / 2
+	if interval < 5*time.Second {
+		interval = 5 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	cluster := os.Getenv("CLUSTER_NAME")
+	if cluster == "" {
+		cluster = "local"
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rows, err := s.pool.Query(ctx, `
+				SELECT o.id, o.shipping_address
+				FROM orders.orders o
+				LEFT JOIN shipping.shipments sh ON sh.order_id = o.id
+				WHERE o.status = 'paid' AND sh.order_id IS NULL`)
+			if err != nil {
+				slog.Error("poll query", "err", err)
+				continue
+			}
+			type row struct{ id, addr string }
+			var pending []row
+			for rows.Next() {
+				var r row
+				if err := rows.Scan(&r.id, &r.addr); err == nil {
+					pending = append(pending, r)
+				}
+			}
+			rows.Close()
+
+			for _, p := range pending {
+				slog.Info("poll: found unshipped paid order, creating shipment",
+					"order_id", p.id)
+				s.createShipment(ctx, p.id, p.addr, cluster)
+			}
+		}
+	}
+}
+
+// createShipment inserts a shipment row and schedules the delayed status update.
+func (s *server) createShipment(ctx context.Context, orderID, addr, cluster string) {
+	tag, err := s.pool.Exec(ctx,
+		`INSERT INTO shipping.shipments (order_id, address, cluster)
+		 VALUES ($1, $2, $3) ON CONFLICT (order_id) DO NOTHING`,
+		orderID, addr, cluster)
+	if err != nil {
+		slog.Error("insert shipment", "err", err, "order_id", orderID)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		return // already processed
+	}
+
+	slog.Info("shipment created — dispatch in", "delay", shippingDelay(), "order_id", orderID)
+
+	go func(oid string) {
+		time.Sleep(shippingDelay())
+		_, err := s.pool.Exec(context.Background(),
+			`UPDATE shipping.shipments SET status = 'shipped', updated_at = now()
+			 WHERE order_id = $1`, oid)
+		if err != nil {
+			slog.Error("shipment status update", "err", err, "order_id", oid)
+			return
+		}
+		_, err = s.pool.Exec(context.Background(),
+			`UPDATE orders.orders SET status = 'shipped' WHERE id = $1`, oid)
+		if err != nil {
+			slog.Error("order status update", "err", err, "order_id", oid)
+		}
+		slog.Info("shipment shipped", "order_id", oid)
+	}(orderID)
 }
 
 func (s *server) consumeOrders(ctx context.Context) {
@@ -159,41 +244,7 @@ func (s *server) consumeOrders(ctx context.Context) {
 			continue
 		}
 
-		tag, err := s.pool.Exec(ctx,
-			`INSERT INTO shipping.shipments (order_id, address, cluster)
-			 VALUES ($1, $2, $3) ON CONFLICT (order_id) DO NOTHING`,
-			event.OrderID, event.ShippingAddress, cluster)
-		if err != nil {
-			slog.Error("insert shipment", "err", err, "order_id", event.OrderID)
-			continue
-		}
-		if tag.RowsAffected() == 0 {
-			continue // already processed
-		}
-
-		slog.Info("shipment preparing", "order_id", event.OrderID, "address", event.ShippingAddress,
-			"delay", shippingDelay())
-
-		// Fire-and-forget goroutine: wait the shipping delay then mark as shipped.
-		go func(orderID string) {
-			time.Sleep(shippingDelay())
-
-			_, err := s.pool.Exec(context.Background(),
-				`UPDATE shipping.shipments SET status = 'shipped', updated_at = now()
-				 WHERE order_id = $1`, orderID)
-			if err != nil {
-				slog.Error("shipment status update", "err", err, "order_id", orderID)
-				return
-			}
-
-			// Transition order: paid → shipped (cross-schema, same CockroachDB cluster).
-			_, err = s.pool.Exec(context.Background(),
-				`UPDATE orders.orders SET status = 'shipped' WHERE id = $1`, orderID)
-			if err != nil {
-				slog.Error("order status update", "err", err, "order_id", orderID)
-			}
-			slog.Info("shipment shipped", "order_id", orderID)
-		}(event.OrderID)
+		s.createShipment(ctx, event.OrderID, event.ShippingAddress, cluster)
 	}
 }
 

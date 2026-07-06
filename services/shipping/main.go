@@ -45,13 +45,6 @@ func shippingDelay() time.Duration {
 	return 30 * time.Second
 }
 
-// Shipping locations — network-themed delivery addresses.
-var locations = map[string]string{
-	"default-gateway": "Default Gateway — 0.0.0.0, The Internet",
-	"dev-null":        "/dev/null — Bit Bucket Lane, The Void",
-	"bgp-blackhole":   "BGP Blackhole — AS64512, Null Route, Nowhere",
-}
-
 type Shipment struct {
 	ID          string    `json:"id"`
 	OrderID     string    `json:"order_id"`
